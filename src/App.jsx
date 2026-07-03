@@ -8,6 +8,7 @@ import AuthLayout from "./layouts/AuthLayout";
 import StudentLayout from "./layouts/StudentLayout";
 import AdminLayout from "./layouts/AdminLayout";
 import Login from "./Login";
+import Signup from "./Signup";
 
 import Home from "./StudentHome";
 import Availability from "./CourtAvailability";
@@ -60,6 +61,11 @@ function AppRoutes() {
           <Route path="/login" element={
              <AuthRoute>
                 <Login />
+             </AuthRoute>
+          } />
+          <Route path="/signup" element={
+             <AuthRoute>
+                <Signup />
              </AuthRoute>
           } />
         </Route>
