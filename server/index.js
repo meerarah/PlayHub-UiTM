@@ -39,7 +39,19 @@ app.get('/api/debug-db', async (req, res) => {
   try {
     const [users] = await pool.query('SELECT id, fullname, email, role FROM users LIMIT 50');
     const [photos] = await pool.query('SELECT photoID, caption, studentID FROM photo_diaries LIMIT 50');
-    res.json({ users, photos });
+    
+    let testError = null;
+    try {
+      await pool.query(
+        'INSERT INTO users (id, fullname, email, role) VALUES (?, ?, ?, ?)',
+        ['test_debug_id', 'Test User', 'test_debug@example.com', 'student']
+      );
+      await pool.query('DELETE FROM users WHERE id = ?', ['test_debug_id']);
+    } catch (e) {
+      testError = { message: e.message, code: e.code, errno: e.errno, sqlState: e.sqlState };
+    }
+    
+    res.json({ users, photos, testError });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
