@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Star, Send, Loader2, CheckCircle2 } from "lucide-react";
-import { db } from "./lib/firebase";
-import { collection, query, getDocs, doc, getDoc, addDoc, where, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "./context/AuthContext";
+import { api } from "./lib/api";
+
 
 export default function Feedback() {
   const { user } = useAuth();
@@ -30,8 +30,7 @@ export default function Feedback() {
         rating: rating,
         comment: comment,
         category: category,
-        studentid: user.uid,
-        timestamp: serverTimestamp()
+        studentid: user.uid
       };
 
       // Attach event name if they typed one
@@ -39,7 +38,7 @@ export default function Feedback() {
         payload.eventName = eventName.trim();
       }
 
-      await addDoc(collection(db, 'feedbacks'), payload);
+      await api.createFeedback(payload);
 
       setSuccess(true);
       setRating(0);

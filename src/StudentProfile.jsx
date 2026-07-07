@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "./context/AuthContext";
 import { Award, ChevronRight, FileBadge, Loader2, Download, X, Medal, Clock, MapPin, Settings, Save } from "lucide-react";
+import { api } from "./lib/api";
 import { db, auth } from "./lib/firebase";
 import { collection, query, getDocs, getDoc, doc, where, updateDoc, setDoc } from "firebase/firestore";
 import { signOut } from "firebase/auth";
@@ -121,79 +122,66 @@ export default function Profile() {
          setProfile(null);
       }
 
-      // 2. Fetch Certificates (Completed Registrations)
-      const q = query(
-        collection(db, 'Registration'), 
-        where('studentid', '==', user.uid),
-        where('status', '==', 'completed')
-      );
-      const regSnap = await getDocs(q);
-      const regList = regSnap.docs.map(d => ({ id: d.id, ...d.data(), type: 'session' }));
+      // 2. Fetch Certificates (Completed Registrations) from MySQL
+      let enrichedCerts = [];
+      try {
+        const regs = await api.getStudentEventRegistrations(user.uid);
+        
+        // Count as completed if status is 'completed' OR if status is 'approved' and the time slot has passed
+        const todayObj = new Date();
+        const yyyy = todayObj.getFullYear();
+        const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
+        const dd = String(todayObj.getDate()).padStart(2, '0');
+        const todayStr = `${yyyy}-${mm}-${dd}`;
+        const currentHour = todayObj.getHours();
 
-      // Fetch associated Sport_event data for each registration
-      const enrichedCerts = await Promise.all(regList.map(async (reg) => {
-        const sportDoc = await getDoc(doc(db, 'Sport_event', reg.sportid));
-        return {
+        const completedRegs = regs.filter(r => {
+          if (r.status === 'completed') return true;
+          if (r.status === 'approved') {
+            const ev = r.Sport_event;
+            if (!ev) return false;
+            const endHour = ev.slot ? ev.slot + 1 : 24;
+            if (ev.date < todayStr) return true;
+            if (ev.date === todayStr && endHour <= currentHour) return true;
+          }
+          return false;
+        });
+
+        enrichedCerts = completedRegs.map(reg => ({
           ...reg,
-          Sport_event: sportDoc.exists() ? sportDoc.data() : { sportname: "Deleted Event", date: "TBA", venue: "TBA" }
-        };
-      }));
-
-      // Fetch completed tournament registrations where this user is the leader/registrant
-      const tq = query(
-        collection(db, 'Tournament_Registrations'),
-        where('studentId', '==', user.uid),
-        where('status', '==', 'completed')
-      );
-      const tRegSnap = await getDocs(tq);
-      const tRegList1 = tRegSnap.docs.map(d => ({ id: d.id, ...d.data(), type: 'tournament' }));
-
-      // Fetch completed tournament registrations where this user is a roster member matrixId
-      let tRegList2 = [];
-      if (matrixId) {
-         const tq2 = query(
-           collection(db, 'Tournament_Registrations'),
-           where('memberMatrixIds', 'array-contains', matrixId),
-           where('status', '==', 'completed')
-         );
-         const tRegSnap2 = await getDocs(tq2);
-         tRegList2 = tRegSnap2.docs.map(d => ({ id: d.id, ...d.data(), type: 'tournament' }));
+          type: 'session'
+        }));
+      } catch (mysqlErr) {
+        console.error("Error loading event certificates from MySQL:", mysqlErr.message);
       }
 
-      // Merge and de-duplicate
-      const mergedTReg = [];
-      const seenIds = new Set();
-      [...tRegList1, ...tRegList2].forEach(reg => {
-         if (!seenIds.has(reg.id)) {
-            seenIds.add(reg.id);
-            mergedTReg.push(reg);
-         }
-      });
-
-      const enrichedTCerts = await Promise.all(mergedTReg.map(async (reg) => {
-         const tDoc = await getDoc(doc(db, 'Tournaments', reg.tournamentId));
-         const tData = tDoc.exists() ? tDoc.data() : { name: "Deleted Tournament", date: "TBA", venue: "TBA", sport: "Sport" };
-         return {
-           ...reg,
-           Sport_event: {
-              sportname: tData.name,
-              date: tData.date,
-              venue: tData.venue || "Kompleks Sukan UiTM Shah Alam"
-           }
-         };
-      }));
+      // Fetch completed tournament registrations from MySQL
+      let enrichedTCerts = [];
+      try {
+        const regs = await api.getStudentTournamentRegistrations(user.uid, matrixId);
+        const completedRegs = regs.filter(r => r.status === 'completed');
+        enrichedTCerts = completedRegs.map(reg => ({
+          ...reg,
+          type: 'tournament',
+          Sport_event: {
+             sportname: reg.tournamentName,
+             date: reg.tournamentDate,
+             venue: reg.venue || "Kompleks Sukan UiTM Shah Alam"
+          }
+        }));
+      } catch (mysqlErr) {
+        console.error("Error loading tournament certificates from MySQL:", mysqlErr.message);
+      }
 
       setCertificates([...enrichedCerts, ...enrichedTCerts]);
 
-      // 3. Fetch Badges
-      const bq = query(collection(db, 'Student_Badge'), where('studentid', '==', user.uid));
-      const bSnap = await getDocs(bq);
-      const bList = await Promise.all(bSnap.docs.map(async (b) => {
-        const bData = b.data();
-        const bInfo = await getDoc(doc(db, 'Badge', bData.badgeid));
-        return { id: b.id, ...bData, Badge: bInfo.exists() ? bInfo.data() : null };
-      }));
-      setBadges(bList);
+      // 3. Fetch Badges from MySQL
+      try {
+        const bList = await api.getStudentBadges(user.uid);
+        setBadges(bList);
+      } catch (badgeErr) {
+        console.error("Error loading badges from MySQL:", badgeErr.message);
+      }
 
     } catch (error) {
       console.error("Error fetching profile data:", error);
@@ -595,7 +583,7 @@ export default function Profile() {
                                     </div>
                                     <div className="text-right space-y-1">
                                        <p className="font-bold" style={{ color: "#1e293b" }}>Certificate ID</p>
-                                       <p className="font-mono text-[9px] font-bold uppercase" style={{ color: "#b45309" }}>{selectedCert.id.substring(0, 12)}</p>
+                                       <p className="font-mono text-[9px] font-bold uppercase" style={{ color: "#b45309" }}>{String(selectedCert.id).substring(0, 12)}</p>
                                     </div>
                                  </div>
                               </div>
@@ -606,7 +594,7 @@ export default function Profile() {
                     {/* Download Action Bar */}
                      <div className="bg-brand-deep p-6 px-10 flex flex-col md:flex-row items-center justify-between gap-4">
                         <div className="text-white/60 text-xs font-bold uppercase tracking-wider hidden md:block">
-                           Digital ID: {selectedCert.id.substring(0, 8)}...
+                           Digital ID: {String(selectedCert.id).substring(0, 8)}...
                         </div>
                         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
                            <button 

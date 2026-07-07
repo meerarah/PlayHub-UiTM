@@ -3,6 +3,8 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { auth, db } from '../lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { api } from '../lib/api';
+
 
 const AuthContext = createContext({});
 
@@ -19,14 +21,42 @@ export const AuthProvider = ({ children }) => {
         
         let currentRole = 'student';
         
-        // Fetch role from Firestore
+        // Fetch role from MySQL backend (falling back to Firestore if needed)
         try {
-          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-          if (userDoc.exists()) {
-            currentRole = userDoc.data().role;
-          }
+          const dbUser = await api.getUser(firebaseUser.uid);
+          currentRole = dbUser.role || 'student';
+          console.log("[AuthContext] Loaded user role from MySQL:", currentRole);
         } catch (error) {
-          console.error("[AuthContext] Error fetching user role from Firestore:", error);
+          console.log("[AuthContext] User not found in MySQL or server offline, trying Firestore/Sync...", error.message);
+          
+          // Try Firestore fallback
+          try {
+            const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+            if (userDoc.exists()) {
+              currentRole = userDoc.data().role || 'student';
+              
+              // Sync this user to MySQL in background
+              api.syncUser({
+                id: firebaseUser.uid,
+                fullname: userDoc.data().fullname || firebaseUser.displayName || 'Student',
+                email: firebaseUser.email,
+                role: currentRole,
+                matrixId: userDoc.data().matrixId || null,
+                residencyType: userDoc.data().residencyType || null,
+                course: userDoc.data().course || null
+              }).catch(err => console.warn("[AuthContext] Background MySQL sync failed:", err.message));
+            } else {
+              // Create user in MySQL (first time login fallback)
+              api.syncUser({
+                id: firebaseUser.uid,
+                fullname: firebaseUser.displayName || 'Student',
+                email: firebaseUser.email,
+                role: 'student'
+              }).catch(err => console.warn("[AuthContext] Background MySQL create failed:", err.message));
+            }
+          } catch (fsError) {
+            console.error("[AuthContext] Firestore fallback failed:", fsError.message);
+          }
         }
 
         // Fail-safe: Force admin role if email matches staff/admin pattern
@@ -36,6 +66,14 @@ export const AuthProvider = ({ children }) => {
         ) {
           console.log("[AuthContext] Fail-safe active: Forcing 'admin' role based on email pattern");
           currentRole = 'admin';
+          
+          // Background sync to MySQL
+          api.syncUser({
+            id: firebaseUser.uid,
+            fullname: firebaseUser.displayName || 'Admin',
+            email: firebaseUser.email,
+            role: 'admin'
+          }).catch(err => console.warn("[AuthContext] Background MySQL Admin sync failed:", err.message));
           
           // Background sync to Firestore (fails silently if rules are locked)
           setDoc(doc(db, 'users', firebaseUser.uid), {

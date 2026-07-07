@@ -5,6 +5,7 @@ import { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimest
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "./context/AuthContext";
 import { createNotification } from "./lib/notificationUtils";
+import { api } from "./lib/api";
 
 export default function StudentJoinIn() {
   const { user } = useAuth();
@@ -25,18 +26,18 @@ export default function StudentJoinIn() {
   const fetchSharedSessions = async () => {
     setLoading(true);
     try {
-      // Get all shared sessions
-      const q = query(
-        collection(db, "Sport_event"),
-        where("type", "==", "shared_session")
-      );
-      const snapshot = await getDocs(q);
-      const today = new Date().toISOString().split('T')[0];
+      // Get all shared sessions from MySQL
+      const data = await api.getEvents({ type: 'shared_session' });
+      const todayObj = new Date();
+      const yyyy = todayObj.getFullYear();
+      const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
+      const dd = String(todayObj.getDate()).padStart(2, '0');
+      const today = `${yyyy}-${mm}-${dd}`;
+      const currentHour = todayObj.getHours();
       
-      const available = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }))
+      const available = data
         .filter(s => s.status !== 'rejected')
-        .filter(s => s.date >= today)
+        .filter(s => s.date > today || (s.date === today && s.slot > currentHour))
         .filter(s => (s.currentPlayers || 1) < s.maxplayers)
         .sort((a, b) => a.date.localeCompare(b.date) || a.slot - b.slot);
 
@@ -88,17 +89,11 @@ export default function StudentJoinIn() {
       let proofUrl = "";
 
       await Promise.all(selectedSession.events.map(async (event) => {
-        await addDoc(collection(db, 'Registration'), {
-          studentid: user.uid,
-          sportid: event.id,
-          status: 'approved',
+        await api.joinEvent(event.id, {
+          studentId: user.uid,
+          participantCount: participants,
           proofUrl: proofUrl,
-          participantsCount: participants,
-          timestamp: serverTimestamp()
-        });
-        
-        await updateDoc(doc(db, 'Sport_event', event.id), {
-          currentPlayers: (event.currentPlayers || 1) + participants
+          status: 'approved'
         });
       }));
 

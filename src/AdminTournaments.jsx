@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { Trophy, CheckCircle, XCircle, Loader2, User, Plus, X, Calendar as CalendarIcon, Award, Download, Trash2, Edit2, FileText } from "lucide-react";
-import { db } from "./lib/firebase";
-import { collection, query, orderBy, getDocs, doc, updateDoc, getDoc, addDoc, serverTimestamp, where, deleteDoc } from "firebase/firestore";
+import { api } from "./lib/api";
+
 
 export default function AdminTournaments() {
   const [requests, setRequests] = useState([]);
@@ -33,10 +33,8 @@ export default function AdminTournaments() {
   const fetchPublishedTournaments = async () => {
     setLoading(true);
     try {
-      const q = query(collection(db, "Tournaments"), orderBy("createdAt", "desc"));
-      const snapshot = await getDocs(q);
-      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setPublishedTournaments(list);
+      const data = await api.getTournaments();
+      setPublishedTournaments(data);
     } catch (error) {
       console.error("Error fetching tournaments:", error);
     } finally {
@@ -48,28 +46,8 @@ export default function AdminTournaments() {
      setSelectedT(t);
      setLoadingRegistrations(true);
      try {
-        const q = query(collection(db, "Tournament_Registrations"), where("tournamentId", "==", t.id));
-        const snapshot = await getDocs(q);
-        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
-        // Enrich with user details
-        const enriched = await Promise.all(list.map(async (r) => {
-           let studentName = "Unknown Student";
-           let email = "N/A";
-           let residencyType = "College";
-           let matrixId = "N/A";
-           if (r.studentId) {
-              const sDoc = await getDoc(doc(db, "users", r.studentId));
-              if (sDoc.exists()) {
-                 studentName = sDoc.data().fullname || "Student";
-                 email = sDoc.data().email || "N/A";
-                 residencyType = sDoc.data().residencyType || "College";
-                 matrixId = sDoc.data().matrixId || "N/A";
-              }
-           }
-           return { ...r, studentName, email, residencyType, matrixId };
-        }));
-        setTRegistrations(enriched);
+        const data = await api.getTournamentRegistrations(t.id);
+        setTRegistrations(data);
      } catch (err) {
         console.error(err);
      } finally {
@@ -81,7 +59,7 @@ export default function AdminTournaments() {
      if (!confirm(`Are you sure you want to mark this registration as ${status}?`)) return;
      setUpdatingRegistrationId(regId);
      try {
-        await updateDoc(doc(db, "Tournament_Registrations", regId), { status });
+        await api.updateTournamentRegistrationStatus(regId, status);
         setTRegistrations(prev => prev.map(r => r.id === regId ? { ...r, status } : r));
      } catch (err) {
         console.error(err);
@@ -95,10 +73,7 @@ export default function AdminTournaments() {
      if (!confirm("Complete tournament participation for this team? This will generate their E-Certificate!")) return;
      setUpdatingRegistrationId(regId);
      try {
-        await updateDoc(doc(db, "Tournament_Registrations", regId), {
-           status: "completed",
-           completedAt: serverTimestamp()
-        });
+        await api.updateTournamentRegistrationStatus(regId, "completed");
         setTRegistrations(prev => prev.map(r => r.id === regId ? { ...r, status: "completed" } : r));
         alert("Tournament completed for this team. E-Certificate issued!");
      } catch (err) {
@@ -211,23 +186,8 @@ export default function AdminTournaments() {
   const fetchRequests = async () => {
     setLoading(true);
     try {
-      const q = query(collection(db, "Tournament_Requests"), orderBy("createdAt", "desc"));
-      const snapshot = await getDocs(q);
-      const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-      // Fetch student details for each request
-      const enrichedReqs = await Promise.all(reqs.map(async (r) => {
-        let studentName = "Unknown Student";
-        if (r.studentId) {
-          const sDoc = await getDoc(doc(db, "users", r.studentId));
-          if (sDoc.exists()) {
-            studentName = sDoc.data().fullname || "Student";
-          }
-        }
-        return { ...r, studentName };
-      }));
-
-      setRequests(enrichedReqs);
+      const data = await api.getTournamentRequests();
+      setRequests(data);
     } catch (error) {
       console.error("Error fetching tournament requests:", error);
     } finally {
@@ -238,7 +198,7 @@ export default function AdminTournaments() {
   const updateStatus = async (id, status) => {
     setProcessing(id);
     try {
-      await updateDoc(doc(db, "Tournament_Requests", id), { status });
+      await api.updateTournamentRequestStatus(id, status);
       setRequests(prev => prev.map(r => r.id === id ? { ...r, status } : r));
     } catch (error) {
       console.error("Error updating status:", error);
@@ -289,20 +249,12 @@ export default function AdminTournaments() {
     setProcessing(editingItem ? "updating" : "creating");
     try {
       if (editingItem) {
-        await updateDoc(doc(db, "Tournaments", editingItem.id), {
-          ...formData,
-          updatedAt: serverTimestamp()
-        });
+        await api.updateTournament(editingItem.id, formData);
         alert("Tournament updated successfully!");
       } else {
-        await addDoc(collection(db, "Tournaments"), {
-          ...formData,
-          status: "active",
-          createdAt: serverTimestamp()
-        });
-
+        await api.createTournament(formData);
+        
         if (formData.requestId) {
-           await updateDoc(doc(db, "Tournament_Requests", formData.requestId), { status: 'approved' });
            setRequests(prev => prev.map(r => r.id === formData.requestId ? { ...r, status: 'approved' } : r));
         }
         alert("Tournament created successfully!");
@@ -322,7 +274,7 @@ export default function AdminTournaments() {
   const handleDeleteTournament = async (id) => {
     if (!confirm("Are you sure you want to delete this tournament? This action cannot be undone and will remove the tournament entirely.")) return;
     try {
-      await deleteDoc(doc(db, "Tournaments", id));
+      await api.deleteTournament(id);
       setPublishedTournaments(prev => prev.filter(t => t.id !== id));
       alert("Tournament deleted successfully!");
     } catch (error) {

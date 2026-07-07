@@ -4,6 +4,8 @@ import { UserPlus, Mail, Lock, User, Loader2, ShieldCheck } from "lucide-react";
 import { auth, db } from "./lib/firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { api } from "./lib/api";
+
 
 export default function Signup() {
   const [email, setEmail] = useState("");
@@ -45,6 +47,20 @@ export default function Signup() {
         role: "student",
         createdAt: serverTimestamp()
       });
+      
+      // Also sync user to MySQL
+      try {
+        await api.syncUser({
+          id: firebaseUser.uid,
+          fullname: fullName,
+          email,
+          role: "student",
+          matrixId: matrixId.trim(),
+          residencyType: residencyType
+        });
+      } catch (mysqlErr) {
+        console.warn("Failed to sync user registration to MySQL database:", mysqlErr.message);
+      }
       
       alert("Registration successful! You can now sign in.");
       navigate("/login");

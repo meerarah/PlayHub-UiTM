@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { X, Bell, Calendar, Info, CheckCircle2, Trash2 } from "lucide-react";
-import { db } from "../lib/firebase";
-import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, deleteDoc, writeBatch, getDocs } from "firebase/firestore";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/utils";
+import { api } from "../lib/api";
 
 export default function NotificationsSheet({ isOpen, onClose }) {
   const { user } = useAuth();
@@ -13,24 +12,25 @@ export default function NotificationsSheet({ isOpen, onClose }) {
   useEffect(() => {
     if (!user?.uid || !isOpen) return;
 
-    const q = query(
-      collection(db, "notifications"),
-      where("userId", "==", user.uid),
-      orderBy("createdAt", "desc")
-    );
+    const loadNotifications = async () => {
+      setLoading(true);
+      try {
+        const data = await api.getNotifications(user.uid);
+        setNotifications(data);
+      } catch (error) {
+        console.error("Error loading notifications:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setNotifications(data);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    loadNotifications();
   }, [user, isOpen]);
 
   const markAsRead = async (id) => {
     try {
-      await updateDoc(doc(db, "notifications", id), { isRead: true });
+      await api.markNotificationRead(id);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
     } catch (e) {
       console.error(e);
     }
@@ -40,16 +40,18 @@ export default function NotificationsSheet({ isOpen, onClose }) {
     const unread = notifications.filter(n => !n.isRead);
     if (unread.length === 0) return;
     
-    const batch = writeBatch(db);
-    unread.forEach(n => {
-      batch.update(doc(db, "notifications", n.id), { isRead: true });
-    });
-    await batch.commit();
+    try {
+      await api.markAllNotificationsRead(user.uid);
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const deleteNotification = async (id) => {
     try {
-      await deleteDoc(doc(db, "notifications", id));
+      await api.deleteNotification(id);
+      setNotifications(prev => prev.filter(n => n.id !== id));
     } catch (e) {
       console.error(e);
     }
@@ -161,7 +163,7 @@ export default function NotificationsSheet({ isOpen, onClose }) {
                           {n.message}
                         </p>
                         <span className="text-[10px] text-slate-400 font-bold uppercase mt-2 block">
-                          {n.createdAt?.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          {n.createdAt ? new Date(n.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
                         </span>
                       </div>
                     </div>

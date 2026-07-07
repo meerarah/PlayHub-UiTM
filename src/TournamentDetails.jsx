@@ -6,6 +6,8 @@ import { doc, getDoc, collection, addDoc, serverTimestamp, query, where, getDocs
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "./context/AuthContext";
 import { createNotification } from "./lib/notificationUtils";
+import { api } from "./lib/api";
+
 
 export default function TournamentDetails() {
   const { id } = useParams();
@@ -43,26 +45,18 @@ export default function TournamentDetails() {
   const fetchTournament = async () => {
     setLoading(true);
     try {
-      const docRef = doc(db, "Tournaments", id);
-      const docSnap = await getDoc(docRef);
-      let tData = null;
-      if (docSnap.exists()) {
-        tData = { id: docSnap.id, ...docSnap.data() };
-        setTournament(tData);
-      } else {
-         navigate("/");
-         return;
-      }
+      // 1. Fetch tournament details from MySQL backend
+      const tData = await api.getTournamentById(id);
+      setTournament(tData);
 
-      // Check current registrations count & taken team slots
-      const q = query(collection(db, "Tournament_Registrations"), where("tournamentId", "==", id));
-      const qSnap = await getDocs(q);
-      setRegisteredCount(qSnap.size);
+      // 2. Fetch all registrations for this tournament
+      const registrations = await api.getTournamentRegistrations(id);
+      setRegisteredCount(registrations.length);
       
-      const taken = qSnap.docs.map(d => d.data().teamSlot).filter(Boolean);
+      const taken = registrations.map(d => d.teamSlot).filter(Boolean);
       setTakenTeamSlots(taken);
 
-      // Initialize team roster based on sport player count
+      // 3. Initialize team roster based on sport player count
       const count = getSportPlayerCount(tData.sport);
       let leaderName = "";
       let leaderMatrix = "";
@@ -70,13 +64,15 @@ export default function TournamentDetails() {
       let leaderCollege = "";
       let leaderPhone = "";
       if (user) {
-         const uDoc = await getDoc(doc(db, "users", user.uid));
-         if (uDoc.exists()) {
-            leaderName = uDoc.data().fullname || "";
-            leaderMatrix = uDoc.data().matrixId || "";
-            leaderResidency = uDoc.data().residencyType || "College";
-            leaderCollege = uDoc.data().collegeName || "";
-            leaderPhone = uDoc.data().phone || "";
+         try {
+           const dbUser = await api.getUser(user.uid);
+           leaderName = dbUser.fullname || "";
+           leaderMatrix = dbUser.matrixId || "";
+           leaderResidency = dbUser.residencyType || "College";
+           leaderCollege = dbUser.collegeName || "";
+           leaderPhone = dbUser.phoneNumber || "";
+         } catch (userErr) {
+           console.error("Error loading user profile from MySQL:", userErr.message);
          }
       }
       setPhone(leaderPhone);
@@ -89,22 +85,17 @@ export default function TournamentDetails() {
       });
       setMembers(initialMembers);
 
-      // Check if user already registered
+      // 4. Check if user already registered (as leader or in a roster)
       if (user) {
-         const userQ = query(collection(db, "Tournament_Registrations"), where("tournamentId", "==", id), where("studentId", "==", user.uid));
-         const userQSnap = await getDocs(userQ);
-         
-         // Also check if they are registered as a member matching their matrix ID
-         let isReg = !userQSnap.empty;
+         let isReg = registrations.some(r => r.studentID === user.uid);
          if (!isReg && leaderMatrix) {
-            const memberQ = query(collection(db, "Tournament_Registrations"), where("tournamentId", "==", id), where("memberMatrixIds", "array-contains", leaderMatrix));
-            const memberSnap = await getDocs(memberQ);
-            isReg = !memberSnap.empty;
+            isReg = registrations.some(r => r.memberMatrixIds && r.memberMatrixIds.includes(leaderMatrix));
          }
          setHasRegistered(isReg);
       }
     } catch (error) {
       console.error("Error fetching tournament:", error);
+      navigate("/");
     } finally {
       setLoading(false);
     }
@@ -141,17 +132,14 @@ export default function TournamentDetails() {
 
       const memberMatrixIds = membersList.map(m => m.matrixId).filter(Boolean);
 
-      await addDoc(collection(db, 'Tournament_Registrations'), {
+      await api.registerTournament(tournament.id, {
         studentId: user.uid,
-        tournamentId: tournament.id,
         teamSlot: selectedTeamSlot,
         teamName: teamName.trim(),
         phone: phone.trim(),
         participantsCount: membersList.length,
-        status: 'pending',
         members: membersList,
-        memberMatrixIds: memberMatrixIds,
-        timestamp: serverTimestamp()
+        memberMatrixIds: memberMatrixIds
       });
       
       await createNotification(user.uid, "Tournament Registration Sent!", `Your registration for ${tournament.name} is pending admin approval.`, "event");

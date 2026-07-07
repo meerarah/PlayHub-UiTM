@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { Trophy, Send, Loader2, Calendar as CalendarIcon, Users, FileText, Upload } from "lucide-react";
-import { db } from "./lib/firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "./context/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { api } from "./lib/api";
 
 export default function TournamentRequest() {
   const { user } = useAuth();
@@ -52,13 +51,11 @@ export default function TournamentRequest() {
 
     setLoading(true);
     try {
-      await addDoc(collection(db, "Tournament_Requests"), {
+      await api.createTournamentRequest({
         ...formData,
         studentId: user.uid,
-        status: "pending", // admin needs to review and key in
         documentName: docFileName,
-        documentBase64: docBase64,
-        createdAt: serverTimestamp(),
+        documentBase64: docBase64
       });
       setSuccess(true);
     } catch (error) {

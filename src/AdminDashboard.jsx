@@ -41,6 +41,7 @@ import { signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import { cn } from "./lib/utils";
+import { api } from "./lib/api";
 import { initializeSystem } from "./lib/adminUtils";
 
 export default function AdminDashboard() {
@@ -109,11 +110,10 @@ export default function AdminDashboard() {
         return;
      }
 
-     const headers = ["STUDENT NAME", "MATRIX ID", "PHONE NUMBER", "EVENT NAME", "SPORT CATEGORY", "RESIDENCY STATUS", "CERTIFICATE ID", "STATUS"];
+     const headers = ["STUDENT NAME", "MATRIX ID", "EVENT NAME", "SPORT CATEGORY", "RESIDENCY STATUS", "CERTIFICATE ID", "STATUS"];
      const rows = filtered.map(p => {
         const studentName = p.user?.fullname || "Unknown";
         const matrixId = p.user?.matrixId || "N/A";
-        const phoneNum = p.user?.phone || selectedEventParticipants?.phone || "N/A";
         const eventName = selectedEventParticipants?.sportname || "Unknown Event";
         const sportCategory = getSportCategory(selectedEventParticipants?.sportname);
         const residency = p.user?.residencyType || "College";
@@ -125,7 +125,6 @@ export default function AdminDashboard() {
         return [
            studentName.toUpperCase(),
            matrixId.toUpperCase(),
-           phoneNum.toUpperCase(),
            eventName.toUpperCase(),
            sportCategory.toUpperCase(),
            residencyStr.toUpperCase(),
@@ -166,41 +165,25 @@ export default function AdminDashboard() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Stats
-      const [studentSnap, eventSnap, feedbackSnap] = await Promise.all([
-        getCountFromServer(query(collection(db, 'users'))),
-        getCountFromServer(collection(db, 'Sport_event')),
-        getCountFromServer(collection(db, 'feedbacks'))
-      ]);
-
+      // 1. Fetch Stats from MySQL
+      const counts = await api.getDashboardStats();
       setStats({
-        students: studentSnap.data().count,
-        events: eventSnap.data().count,
-        feedbacks: feedbackSnap.data().count
+        students: counts.users,
+        events: counts.events,
+        feedbacks: counts.feedbacks
       });
 
-      // 2. Fetch Tab Specific Data
+      // 2. Fetch Tab Specific Data from MySQL
       if (activeTab === "events") {
-        const q = query(collection(db, 'Sport_event'), orderBy('createdAt', 'desc'));
-        const snap = await getDocs(q);
-        setEvents(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        const data = await api.getEvents({ type: 'event' });
+        setEvents(data);
       } else if (activeTab === "courts") {
-        const snap = await getDocs(collection(db, 'courts'));
-        setCourts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        const courtsData = await api.getCourts();
+        setCourts(courtsData);
       } else if (activeTab === "bookings") {
-        const q = query(collection(db, 'Sport_event'), where("type", "in", ["full_court", "shared_session"]), orderBy('createdAt', 'desc'));
-        const snap = await getDocs(q);
-        const bookingData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
-        // Enrich with Student Names
-        const enriched = await Promise.all(bookingData.map(async (b) => {
-          if (!b.studentid) return { ...b, studentName: "Unknown" };
-          const uDoc = await getDoc(doc(db, 'users', b.studentid));
-          return { ...b, studentName: uDoc.exists() ? uDoc.data().fullname : "Unknown Student" };
-        }));
-        setBookings(enriched);
+        const data = await api.getEvents({ type: 'full_court,shared_session' });
+        setBookings(data);
       }
-      
     } catch (error) {
       console.error("Error fetching data:", error);
     } finally {
@@ -218,7 +201,11 @@ export default function AdminDashboard() {
   const handleDelete = async (coll, id) => {
     if (!confirm("Are you sure?")) return;
     try {
-      await deleteDoc(doc(db, coll, id));
+      if (coll === 'Sport_event') {
+        await api.deleteEvent(id);
+      } else if (coll === 'courts') {
+        await api.deleteCourt(id);
+      }
       fetchDashboardData();
     } catch (e) { alert("Delete failed"); }
   };
@@ -249,14 +236,16 @@ export default function AdminDashboard() {
     setShowParticipantModal(true);
     setFetchingParticipants(true);
     try {
-      const q = query(collection(db, 'Registration'), where('sportid', '==', event.id));
-      const snap = await getDocs(q);
-      const regs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const data = await api.getEventParticipants(event.id);
       
-      // Enriched with user names
-      const enriched = await Promise.all(regs.map(async (r) => {
-        const uDoc = await getDoc(doc(db, 'users', r.studentid));
-        return { ...r, user: uDoc.exists() ? uDoc.data() : { fullname: "Unknown Student", email: "N/A" } };
+      // Enriched with user names (for UI compatibility)
+      const enriched = data.map(r => ({
+        ...r,
+        user: {
+          fullname: r.studentName,
+          email: r.email,
+          phone: r.phoneNumber
+        }
       }));
       setParticipantsList(enriched);
     } catch (e) {
@@ -266,50 +255,12 @@ export default function AdminDashboard() {
     }
   };
 
-  const awardBadgeIfEligible = async (studentId, badgeName) => {
-    try {
-      // 1. Get Badge Info
-      const bq = query(collection(db, 'Badge'), where('badgename', '==', badgeName));
-      const bSnap = await getDocs(bq);
-      if (bSnap.empty) return;
-      const badgeId = bSnap.docs[0].id;
-
-      // 2. Check if student already has it
-      const sq = query(
-        collection(db, 'Student_Badge'), 
-        where('studentid', '==', studentId),
-        where('badgeid', '==', badgeId)
-      );
-      const sSnap = await getDocs(sq);
-      
-      if (sSnap.empty) {
-        // 3. Award Badge
-        await addDoc(collection(db, 'Student_Badge'), {
-          studentid: studentId,
-          badgeid: badgeId,
-          awardedAt: serverTimestamp()
-        });
-        console.log(`Badge ${badgeName} awarded to ${studentId}`);
-        return true;
-      }
-    } catch (e) {
-      console.error("Error awarding badge:", e);
-    }
-    return false;
-  };
-
   const markAsCompleted = async (regId, studentId) => {
     if (!confirm("Confirm completion? This will issue a certificate and may award a badge!")) return;
     setUpdatingParticipant(regId);
     try {
-      await updateDoc(doc(db, 'Registration', regId), { 
-        status: 'completed',
-        completedAt: serverTimestamp()
-      });
+      await api.updateParticipantStatus(regId, 'completed', studentId);
       
-      // Award "The Rookie" Badge if first completion
-      await awardBadgeIfEligible(studentId, "The Rookie");
-
       // Refresh list
       fetchParticipants(selectedEventParticipants);
     } catch (e) {
@@ -322,7 +273,7 @@ export default function AdminDashboard() {
   const updateBookingStatus = async (id, status) => {
     if (!confirm(`Confirm mark booking as ${status}?`)) return;
     try {
-      await updateDoc(doc(db, 'Sport_event', id), { status });
+      await api.updateBookingStatus(id, status);
       setBookings(prev => prev.map(b => b.id === id ? { ...b, status } : b));
     } catch (error) {
       alert("Failed to update status");
@@ -333,7 +284,7 @@ export default function AdminDashboard() {
      if (!confirm(`Confirm mark participant as ${status}?`)) return;
      setUpdatingParticipant(regId);
      try {
-       await updateDoc(doc(db, 'Registration', regId), { status });
+       await api.updateParticipantStatus(regId, status);
        fetchParticipants(selectedEventParticipants);
      } catch(e) {
        alert("Failed to update");
@@ -355,22 +306,24 @@ export default function AdminDashboard() {
           maxplayers: parseInt(formData.maxPlayers),
           difficultylevel: formData.difficultyLevel,
           adminid: user.uid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
+          type: 'event',
+          status: 'confirmed'
         };
-        await addDoc(collection(db, 'Sport_event'), payload);
+        await api.createEvent(payload);
+        alert("Event created successfully!");
       } else if (activeTab === "courts") {
         const payload = {
           name: formData.courtName,
           sport: formData.courtSport,
           capacity: parseInt(formData.courtCapacity),
-          image: formData.courtImage.trim() || "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&q=80"
+          image: formData.courtImage.trim() || "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&q=80",
+          arena: 'Pusat Sukan'
         };
         if (editingItem) {
-          await updateDoc(doc(db, 'courts', editingItem.id), payload);
+          await api.updateCourt(editingItem.id, payload);
           alert("Facility updated successfully!");
         } else {
-          await addDoc(collection(db, 'courts'), payload);
+          await api.createCourt(payload);
           alert("Facility added successfully!");
         }
       }

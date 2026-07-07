@@ -1,5 +1,4 @@
-import { db } from "./firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { api } from "./api";
 
 /**
  * Creates a notification for a specific user.
@@ -12,13 +11,11 @@ export const createNotification = async (userId, title, message, type = 'info') 
   if (!userId) return;
   
   try {
-    await addDoc(collection(db, "notifications"), {
+    await api.createNotification({
       userId,
       title,
       message,
-      type,
-      isRead: false,
-      createdAt: serverTimestamp()
+      type
     });
   } catch (error) {
     console.error("Error creating notification:", error);

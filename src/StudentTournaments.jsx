@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { Trophy, Calendar as CalendarIcon, Loader2, Search } from "lucide-react";
-import { db } from "./lib/firebase";
-import { collection, query, getDocs, where } from "firebase/firestore";
 import { Link } from "react-router-dom";
+import { api } from "./lib/api";
+
 
 export default function StudentTournaments() {
   const [activeTournaments, setActiveTournaments] = useState([]);
@@ -15,16 +15,8 @@ export default function StudentTournaments() {
   const fetchTournaments = async () => {
     setLoading(true);
     try {
-      const tQ = query(collection(db, 'Tournaments'), where("status", "==", "active"));
-      const tSnap = await getDocs(tQ);
-      const fetchedTournaments = tSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      
-      fetchedTournaments.sort((a, b) => {
-         const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
-         const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
-         return timeB - timeA;
-      });
-      setActiveTournaments(fetchedTournaments);
+      const data = await api.getTournaments();
+      setActiveTournaments(data);
     } catch (error) {
       console.error("Error fetching tournaments:", error);
     } finally {

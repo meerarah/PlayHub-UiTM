@@ -6,6 +6,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "./context/AuthContext";
 import { cn } from "./lib/utils";
 import { createNotification } from "./lib/notificationUtils";
+import { api } from "./lib/api";
 
 // Define the standard operational hours (24h format) available for court bookings at Pusat Sukan
 const AVAILABLE_SLOTS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21];
@@ -65,22 +66,16 @@ export default function CourtAvailability() {
     fetchData();
   }, [selectedDate]);
 
-  // Fetch both court configurations and all active sport events for the chosen date from Firestore
+  // Fetch both court configurations from MySQL and all active sport events for the chosen date from Firestore
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Fetch Courts list
-      const courtsQuery = await getDocs(collection(db, "courts"));
-      const courtsData = courtsQuery.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Fetch Courts list from MySQL
+      const courtsData = await api.getCourts();
       setCourts(courtsData);
 
-      // Fetch Events/bookings for the selected date only
-      const eventsQuery = query(
-        collection(db, "Sport_event"),
-        where("date", "==", selectedDate)
-      );
-      const eventsSnapshot = await getDocs(eventsQuery);
-      const eventsData = eventsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Fetch Events/bookings for the selected date only from MySQL
+      const eventsData = await api.getEvents({ date: selectedDate });
       setEvents(eventsData);
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -192,20 +187,14 @@ export default function CourtAvailability() {
         }
 
         // Add a registration record linking the user to the shared event
-        await addDoc(collection(db, 'Registration'), {
-          studentid: user.uid,
-          sportid: event.id,
-          status: 'approved',
+        // Add a registration record linking the user to the shared event
+        await api.joinEvent(event.id, {
+          studentId: user.uid,
+          participantCount: participantsToAdd,
           proofUrl: proofUrl,
-          participantsCount: participantsToAdd,
-          timestamp: serverTimestamp()
+          status: 'approved'
         });
         
-        // Update total current players count on the shared event document
-        await updateDoc(doc(db, 'Sport_event', event.id), {
-          currentPlayers: (event.currentPlayers || 1) + participantsToAdd
-        });
-
         // Trigger in-app notification to the joining user
         await createNotification(user.uid, "Join Successful!", `You have successfully joined ${selectedCourt.name} at ${formatHour(selectedSlot)}.`, "event");
       } else {
@@ -223,10 +212,10 @@ export default function CourtAvailability() {
            }
         }
 
-        // Write each hour slot as an individual event document in Firestore
+        // Write each hour slot as an individual event document in MySQL
         for (const s of slotsToBook) {
-            const eventDoc = await addDoc(collection(db, "Sport_event"), {
-              courtId: selectedCourt.id,
+            const eventDoc = await api.createEvent({
+              courtid: selectedCourt.id,
               sportname: selectedCourt.sport,
               venue: selectedCourt.name,
               date: selectedDate,
@@ -240,18 +229,15 @@ export default function CourtAvailability() {
               course: formData.course,
               phone: formData.phone,
               proofUrl: proofUrl,
-              status: "approved",
-              createdAt: serverTimestamp()
+              status: "approved"
             });
 
             // Register the creator to the event so it appears in their user calendar
-            await addDoc(collection(db, "Registration"), {
-              studentid: user.uid,
-              sportid: eventDoc.id,
-              status: 'approved',
+            await api.joinEvent(eventDoc.id, {
+              studentId: user.uid,
+              participantCount: parseInt(formData.participants) || 1,
               proofUrl: proofUrl,
-              participantsCount: parseInt(formData.participants) || 1,
-              timestamp: serverTimestamp()
+              status: 'approved'
             });
         }
 
@@ -344,16 +330,26 @@ export default function CourtAvailability() {
                     const isJoinable = status.status === "joinable";
                     const isBooked = status.status === "booked";
 
+                    const today = new Date();
+                    const yyyy = today.getFullYear();
+                    const mm = String(today.getMonth() + 1).padStart(2, '0');
+                    const dd = String(today.getDate()).padStart(2, '0');
+                    const todayStr = `${yyyy}-${mm}-${dd}`;
+                    const currentHour = today.getHours();
+
+                    const isPast = selectedDate < todayStr || (selectedDate === todayStr && hour <= currentHour);
+                    const isDisabled = isBooked || isPast;
+
                     return (
                       <button
                         key={hour}
-                        disabled={isBooked}
+                        disabled={isDisabled}
                         onClick={() => openBookingModal(court, hour, status)}
                         className={cn(
                           "py-2 px-1 rounded-xl text-xs font-bold flex flex-col items-center justify-center transition-all border",
+                          isDisabled ? "bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed" :
                           isAvailable ? "bg-white border-green-200 text-green-700 hover:bg-green-50" :
-                          isJoinable ? "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100" :
-                          "bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed"
+                          "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
                         )}
                       >
                         <span>{formatHourRange(hour)}</span>

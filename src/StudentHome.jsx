@@ -4,6 +4,7 @@ import { db } from "./lib/firebase";
 import { collection, query, getDocs, getDoc, doc, orderBy, where } from "firebase/firestore";
 import { useAuth } from "./context/AuthContext";
 import { Link } from "react-router-dom";
+import { api } from "./lib/api";
 import { cn } from "./lib/utils";
 import NotificationsSheet from "./components/NotificationsSheet";
 import { onSnapshot } from "firebase/firestore";
@@ -85,13 +86,6 @@ export default function Home() {
   useEffect(() => {
     if (user?.uid) {
        fetchHomeData();
-       
-       // Real-time listener checking Firestore notifications where isRead is false
-       const q = query(collection(db, "notifications"), where("userId", "==", user.uid), where("isRead", "==", false));
-       const unsubscribe = onSnapshot(q, (snap) => {
-         setUnreadCount(snap.size);
-       });
-       return () => unsubscribe(); // Cleanup listener on unmount
     }
   }, [user]);
 
@@ -99,63 +93,57 @@ export default function Home() {
   const fetchHomeData = async () => {
     setLoading(true);
     try {
-      // 1. Get user document for welcome header greeting and matrixId
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      // 1. Get user profile from MySQL
+      const uData = await api.getUser(user.uid);
       let userMatrixId = "";
-      if (userDoc.exists() && userDoc.data().fullname) {
-         setFullName(userDoc.data().fullname.split(' ')[0]);
-         userMatrixId = userDoc.data().matrixId || "";
+      if (uData && uData.fullname) {
+         setFullName(uData.fullname.split(' ')[0]);
+         userMatrixId = uData.matrixId || "";
       }
 
-      // 2. Fetch all registrations representing sport events the student joined
-      const regQ = query(collection(db, 'Registration'), where('studentid', '==', user.uid));
-      const regSnap = await getDocs(regQ);
-      const regSportIds = regSnap.docs.map(d => d.data().sportid);
+      // 2. Fetch notifications and count unread
+      try {
+        const notifications = await api.getNotifications(user.uid);
+        const unread = notifications.filter(n => !n.isRead).length;
+        setUnreadCount(unread);
+      } catch (err) {
+        console.error("Error loading notifications count:", err);
+      }
 
-      // 3. Fetch all active sport events ordered chronologically
-      const allEventsSnap = await getDocs(query(collection(db, 'Sport_event'), orderBy('date', 'asc')));
-      const myEvents = [];
-      
-      allEventsSnap.docs.forEach(d => {
-        const data = { id: d.id, ...d.data() };
-        // Check if user is either the organizer or a registered participant of the event
-        if (data.studentid === user.uid || regSportIds.includes(d.id)) {
-          myEvents.push(data);
-        }
-      });
+      // 3. Fetch all registrations representing sport events the student joined from MySQL
+      const regs = await api.getStudentEventRegistrations(user.uid);
+      const myEvents = regs.map(r => ({
+        id: String(r.sportid),
+        sportname: r.Sport_event.sportname,
+        venue: r.Sport_event.venue,
+        date: r.Sport_event.date,
+        time: r.Sport_event.time,
+        type: r.Sport_event.type,
+        slot: r.Sport_event.slot,
+        studentid: r.studentid,
+        status: r.status
+      }));
 
       // Group consecutive hourly slots
       const mergedSportEvents = groupConsecutiveEvents(myEvents);
 
-      // 4. Fetch tournaments the student is registered for
+      // 4. Fetch tournaments the student is registered for from MySQL
       const registeredTournaments = [];
       if (userMatrixId) {
-         // Query where studentId is user.uid (they registered as captain/leader)
-         const captainQ = query(collection(db, 'Tournament_Registrations'), where('studentId', '==', user.uid));
-         const captainSnap = await getDocs(captainQ);
-         
-         // Query where memberMatrixIds contains user's matrixId
-         const memberQ = query(collection(db, 'Tournament_Registrations'), where('memberMatrixIds', 'array-contains', userMatrixId));
-         const memberSnap = await getDocs(memberQ);
-         
-         const uniqueRegistrationDocs = new Map();
-         captainSnap.docs.forEach(doc => uniqueRegistrationDocs.set(doc.id, doc.data()));
-         memberSnap.docs.forEach(doc => uniqueRegistrationDocs.set(doc.id, doc.data()));
-         
-         const registeredTournamentIds = [...new Set([...uniqueRegistrationDocs.values()].map(r => r.tournamentId))];
-         
-         if (registeredTournamentIds.length > 0) {
-            // Fetch all tournaments details
-            const tournamentsSnap = await getDocs(collection(db, 'Tournaments'));
-            tournamentsSnap.docs.forEach(td => {
-               if (registeredTournamentIds.includes(td.id)) {
-                  registeredTournaments.push({
-                     id: td.id,
-                     ...td.data(),
-                     isTournament: true
-                  });
-               }
-            });
+         try {
+           const regs = await api.getStudentTournamentRegistrations(user.uid, userMatrixId);
+           regs.forEach(r => {
+             registeredTournaments.push({
+               id: String(r.tournamentID),
+               name: r.tournamentName,
+               sport: r.tournamentSport,
+               date: r.tournamentDate,
+               status: r.status,
+               isTournament: true
+             });
+           });
+         } catch (mysqlErr) {
+           console.error("Error loading tournament schedule from MySQL:", mysqlErr.message);
          }
       }
 
@@ -182,9 +170,33 @@ export default function Home() {
       setMarkedDates([...new Set(activeDates)]);
 
       // 6. Divide into upcoming and past categories
-      const today = new Date().toISOString().split('T')[0];
-      const upcoming = combined.filter(e => e.date >= today).slice(0, 5);
-      const past = combined.filter(e => e.date < today).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 5);
+      const todayObj = new Date();
+      const yyyy = todayObj.getFullYear();
+      const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
+      const dd = String(todayObj.getDate()).padStart(2, '0');
+      const todayStr = `${yyyy}-${mm}-${dd}`;
+      const currentHour = todayObj.getHours();
+
+      const upcoming = combined.filter(e => {
+        if (e.date > todayStr) return true;
+        if (e.date === todayStr) {
+          if (e.isTournament) return true;
+          // Check ending hour for sport events
+          const endHour = e.slots ? e.slots[e.slots.length - 1] + 1 : (e.slot ? e.slot + 1 : 24);
+          return endHour > currentHour;
+        }
+        return false;
+      }).slice(0, 5);
+
+      const past = combined.filter(e => {
+        if (e.date < todayStr) return true;
+        if (e.date === todayStr) {
+          if (e.isTournament) return false;
+          const endHour = e.slots ? e.slots[e.slots.length - 1] + 1 : (e.slot ? e.slot + 1 : 24);
+          return endHour <= currentHour;
+        }
+        return false;
+      }).sort((a, b) => b.date.localeCompare(a.date) || (b.slots ? b.slots[0] - a.slots[0] : 0)).slice(0, 5);
 
       setUpcomingEvents(upcoming);
       setPastEvents(past);

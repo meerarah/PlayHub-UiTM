@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { MessageSquareShare, Star, Loader2 } from "lucide-react";
-import { db } from "./lib/firebase";
-import { collection, query, orderBy, getDocs, doc, getDoc } from "firebase/firestore";
+import { api } from "./lib/api";
+
 
 export default function AdminFeedback() {
   const [feedbacks, setFeedbacks] = useState([]);
@@ -14,32 +14,8 @@ export default function AdminFeedback() {
   const fetchFeedbacks = async () => {
     setLoading(true);
     try {
-      const q = query(collection(db, "feedbacks"), orderBy("timestamp", "desc"));
-      const snapshot = await getDocs(q);
-      const fbData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-      // Fetch student details
-      const enrichedFb = await Promise.all(fbData.map(async (fb) => {
-        let studentName = "Unknown Student";
-        if (fb.studentid) {
-          const sDoc = await getDoc(doc(db, "users", fb.studentid));
-          if (sDoc.exists()) {
-            studentName = sDoc.data().fullname || "Student";
-          }
-        }
-        
-        let eventName = "General Feedback";
-        if (fb.sportid) {
-           const eDoc = await getDoc(doc(db, "Sport_event", fb.sportid));
-           if (eDoc.exists()) {
-              eventName = eDoc.data().sportname || "Event";
-           }
-        }
-        
-        return { ...fb, studentName, eventName };
-      }));
-
-      setFeedbacks(enrichedFb);
+      const data = await api.getFeedbacks();
+      setFeedbacks(data);
     } catch (error) {
       console.error("Error fetching feedbacks:", error);
     } finally {
@@ -102,7 +78,7 @@ export default function AdminFeedback() {
                 </div>
               </div>
               <p className="text-[10px] text-admin-text/40 font-black uppercase tracking-wider text-right mt-4">
-                 {fb.timestamp ? new Date(fb.timestamp.toDate()).toLocaleDateString() : 'Just now'}
+                 {fb.timestamp ? new Date(fb.timestamp).toLocaleDateString() : 'Just now'}
               </p>
             </div>
           ))}
