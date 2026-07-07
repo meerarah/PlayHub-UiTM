@@ -38,7 +38,24 @@ import pool from './db.js';
 app.get('/api/debug-db', async (req, res) => {
   try {
     const [tables] = await pool.query('SHOW TABLES');
-    res.json({ tables });
+    
+    let studentsError = null;
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS students (
+            userID VARCHAR(255) PRIMARY KEY,
+            collegeName VARCHAR(255) DEFAULT 'UiTM',
+            residencyType VARCHAR(50),
+            phoneNumber VARCHAR(50),
+            matrixID VARCHAR(50) UNIQUE,
+            FOREIGN KEY (userID) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+    } catch (err) {
+      studentsError = { message: err.message, code: err.code };
+    }
+    
+    res.json({ tables, studentsError });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
