@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { testConnection } from './db.js';
+import pool, { testConnection } from './db.js';
 import fs from 'fs';
 import path from 'path';
 import courtsRouter from './routes/courts.js';
