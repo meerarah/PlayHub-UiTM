@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Camera, Heart, MessageCircle, Loader2, Plus, X, Upload, Trash2 } from "lucide-react";
+import { Camera, Loader2, Plus, X, Upload, Trash2 } from "lucide-react";
 import { db, storage } from "./lib/firebase";
 import { collection, query, getDocs, addDoc, orderBy, serverTimestamp, doc, updateDoc, where, deleteDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -20,13 +20,6 @@ export default function Gallery() {
   
   // Instagram detail modal states
   const [selectedPhoto, setSelectedPhoto] = useState(null);
-  const [likedPhotos, setLikedPhotos] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('likedPhotos') || '[]');
-    } catch (e) {
-      return [];
-    }
-  });
 
   useEffect(() => {
     if (user?.uid) {
@@ -117,7 +110,6 @@ export default function Gallery() {
         photo_url: photoUrl,
         caption: newCaption,
         studentID: user.uid,
-        likesCount: 0,
         timestamp: serverTimestamp()
       });
       
@@ -134,38 +126,7 @@ export default function Gallery() {
     }
   };
 
-  const handleLikeToggle = async (photo) => {
-    if (!user?.uid) return;
-    const isLiked = likedPhotos.includes(photo.id);
-    let newLikedList;
-    let newCount = photo.likesCount || 0;
 
-    if (isLiked) {
-      newLikedList = likedPhotos.filter(id => id !== photo.id);
-      newCount = Math.max(0, newCount - 1);
-    } else {
-      newLikedList = [...likedPhotos, photo.id];
-      newCount = newCount + 1;
-    }
-
-    setLikedPhotos(newLikedList);
-    localStorage.setItem('likedPhotos', JSON.stringify(newLikedList));
-
-    // Update locally in UI state immediately
-    setPhotos(prev => prev.map(p => p.id === photo.id ? { ...p, likesCount: newCount } : p));
-    if (selectedPhoto && selectedPhoto.id === photo.id) {
-      setSelectedPhoto(prev => ({ ...prev, likesCount: newCount }));
-    }
-
-    // Update in Firestore
-    try {
-      await updateDoc(doc(db, 'photo_diaries', photo.id), {
-        likesCount: newCount
-      });
-    } catch (error) {
-      console.error("Error updating likes in Firestore:", error);
-    }
-  };
 
   const handleDeletePhoto = async (photoId) => {
     if (!confirm("Are you sure you want to delete this photo entry from your diary?")) return;
