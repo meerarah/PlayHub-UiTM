@@ -8,18 +8,18 @@ router.get('/', async (req, res) => {
   try {
     const query = `
       SELECT 
-        f.id,
+        f.feedbackID AS id,
         f.rating,
         f.comment,
         f.category,
-        f.studentid,
-        f.sportid,
+        f.studentID AS studentid,
+        f.sportID AS sportid,
         f.timestamp,
         COALESCE(u.fullname, 'Unknown Student') AS studentName,
         COALESCE(f.eventName, s.sportname, 'General Feedback') AS eventName
       FROM feedbacks f
-      LEFT JOIN users u ON f.studentid = u.id
-      LEFT JOIN Sport_event s ON f.sportid = s.id
+      LEFT JOIN users u ON f.studentID = u.id
+      LEFT JOIN Sport_event s ON f.sportID = s.sportID
       ORDER BY f.timestamp DESC
     `;
     const [rows] = await pool.query(query);
@@ -38,7 +38,7 @@ router.post('/', async (req, res) => {
   }
   try {
     const [result] = await pool.query(
-      'INSERT INTO feedbacks (rating, comment, studentid, sportid, category, eventName) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO feedbacks (rating, comment, studentID, sportID, category, eventName) VALUES (?, ?, ?, ?, ?, ?)',
       [rating, comment || null, studentid, sportid || null, category || null, eventName || null]
     );
     res.status(201).json({ id: result.insertId, rating, comment, studentid, sportid, category, eventName });
