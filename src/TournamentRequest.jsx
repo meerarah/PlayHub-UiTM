@@ -113,14 +113,14 @@ export default function TournamentRequest() {
         {/* Date Selection */}
         <div>
           <label className="text-[10px] font-black uppercase tracking-widest text-brand-primary ml-2 mb-2 block">Preferred Date</label>
-          <div className="relative">
-             <CalendarIcon className="w-5 h-5 absolute left-4 top-4 text-slate-400" />
+          <div className="relative w-full">
+             <CalendarIcon className="w-5 h-5 absolute left-4 top-4 text-slate-400 z-10" />
              <input 
               type="date" 
               min={new Date().toISOString().split('T')[0]}
               value={formData.preferredDate}
               onChange={(e) => setFormData({...formData, preferredDate: e.target.value})}
-              className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-5 py-4 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-slate-700"
+              className="w-full min-w-0 max-w-full block bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-5 py-4 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-slate-700 relative z-0"
              />
           </div>
         </div>
