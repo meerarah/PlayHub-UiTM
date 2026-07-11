@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS Tournament_Requests (
     preferredDate VARCHAR(50),
     sport VARCHAR(100),
     document LONGTEXT,
+    documentName VARCHAR(255),
     status VARCHAR(50) DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
     teamCount INT,
     studentID VARCHAR(255) NOT NULL, -- FK referencing users (specifically students)

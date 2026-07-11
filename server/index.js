@@ -91,6 +91,14 @@ app.listen(PORT, async () => {
     }
     console.log('✅ Database schema tables verified/created.');
     
+    // Ensure documentName column exists in Tournament_Requests table
+    try {
+      await pool.query('ALTER TABLE Tournament_Requests ADD COLUMN documentName VARCHAR(255)');
+      console.log('✅ Added documentName column to Tournament_Requests table.');
+    } catch (e) {
+      // Column probably already exists, which is fine
+    }
+    
     // Seed courts only if empty
     const [courtRows] = await pool.query('SELECT COUNT(*) as count FROM courts');
     if (courtRows[0].count === 0) {

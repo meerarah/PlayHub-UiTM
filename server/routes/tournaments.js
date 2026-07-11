@@ -252,7 +252,7 @@ router.put('/registrations/:regId', async (req, res) => {
 
 // POST create a tournament request from a student
 router.post('/requests', async (req, res) => {
-  const { studentId, sport, preferredDate, teamsCount, description, documentBase64 } = req.body;
+  const { studentId, sport, preferredDate, teamsCount, description, documentBase64, documentName } = req.body;
   if (!studentId || !sport || !preferredDate) {
     return res.status(400).json({ error: 'Missing required request fields (studentId, sport, preferredDate)' });
   }
@@ -260,9 +260,9 @@ router.post('/requests', async (req, res) => {
   try {
     const [result] = await pool.query(
       `INSERT INTO Tournament_Requests 
-       (studentID, sport, preferredDate, teamCount, description, document, status) 
-       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-      [studentId, sport, preferredDate, teamsCount || 4, description || '', documentBase64 || null]
+       (studentID, sport, preferredDate, teamCount, description, document, documentName, status) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+      [studentId, sport, preferredDate, teamsCount || 4, description || '', documentBase64 || null, documentName || null]
     );
     res.status(201).json({ id: result.insertId, sport, status: 'pending' });
   } catch (error) {
@@ -276,7 +276,7 @@ router.get('/requests/all', async (req, res) => {
   try {
     const query = `
       SELECT tr.tournamentRequestID AS id, tr.createdByID, tr.description, tr.preferredDate, 
-             tr.sport, tr.document, tr.status, tr.teamCount, tr.studentID,
+             tr.sport, tr.document AS documentBase64, tr.documentName, tr.status, tr.teamCount, tr.studentID,
              COALESCE(u.fullname, 'Unknown Student') AS studentName
       FROM Tournament_Requests tr
       LEFT JOIN users u ON tr.studentID = u.id
