@@ -175,6 +175,13 @@ export const api = {
     if (!res.ok) throw new Error('Failed to create tournament request');
     return res.json();
   },
+  deleteTournamentRequest: async (requestId) => {
+    const res = await fetch(`${API_BASE_URL}/tournaments/requests/${requestId}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) throw new Error('Failed to delete tournament request');
+    return res.json();
+  },
 
   // Photo Diaries
   getPhotos: async (studentId) => {

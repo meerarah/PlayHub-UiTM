@@ -283,6 +283,18 @@ export default function AdminTournaments() {
     }
   };
 
+  const handleDeleteRequest = async (id) => {
+    if (!confirm("Are you sure you want to delete this tournament request? This action cannot be undone.")) return;
+    try {
+      await api.deleteTournamentRequest(id);
+      setRequests(prev => prev.filter(r => r.id !== id));
+      alert("Tournament request deleted successfully!");
+    } catch (error) {
+      console.error("Error deleting tournament request:", error);
+      alert("Failed to delete tournament request.");
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 bg-admin-card p-6 rounded-[32px] border border-white/40 shadow-xl shadow-admin-accent/5">
@@ -343,6 +355,13 @@ export default function AdminTournaments() {
                     }`}>
                       {req.status}
                     </span>
+                    <button 
+                      onClick={() => handleDeleteRequest(req.id)}
+                      className="text-red-500 hover:text-red-700 p-1.5 hover:bg-red-50 rounded-xl transition-all active:scale-95 cursor-pointer flex items-center justify-center border border-transparent hover:border-red-100"
+                      title="Delete Request"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                   <h3 className="font-black text-admin-text text-lg leading-tight mb-1">{req.sport} Tournament</h3>
                   <p className="text-[10px] text-admin-text/50 font-black uppercase tracking-wider mb-4">{req.preferredDate} • {req.teamsCount} Teams Limit</p>

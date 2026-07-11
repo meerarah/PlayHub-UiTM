@@ -306,6 +306,21 @@ router.put('/requests/:requestId', async (req, res) => {
   }
 });
 
+// DELETE a tournament request
+router.delete('/requests/:requestId', async (req, res) => {
+  const { requestId } = req.params;
+  try {
+    await pool.query(
+      'DELETE FROM Tournament_Requests WHERE tournamentRequestID = ?',
+      [requestId]
+    );
+    res.json({ message: 'Tournament request deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting tournament request:', error);
+    res.status(500).json({ error: 'Database error deleting tournament request' });
+  }
+});
+
 // GET registrations for a student (where they are captain OR member roster player)
 router.get('/student/:studentId/registrations', async (req, res) => {
   const { studentId } = req.params;
